@@ -46,6 +46,7 @@
   #ringTxt{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px}
   #ringTxt b{font-size:34px;font-variant-numeric:tabular-nums}
   #ringTxt span{font-size:12px;color:var(--muted)}
+  #ringSub{font-size:11px;margin-top:6px;opacity:.75}
   footer{padding:10px 14px calc(10px + var(--safe-b));border-top:1px solid var(--line);display:flex;flex-direction:column;gap:8px}
   .row{display:flex;gap:8px}
   button{
@@ -66,6 +67,11 @@
   label.field .lbl{display:flex;justify-content:space-between;font-size:14px;margin-bottom:6px}
   label.field .lbl i{font-style:normal;color:var(--accent);font-variant-numeric:tabular-nums}
   input[type=range]{width:100%;accent-color:var(--accent)}
+  .seg{display:flex;gap:6px;background:#0d1117;border:1px solid var(--line);border-radius:12px;padding:4px}
+  .seg label{flex:1;position:relative}
+  .seg input{position:absolute;opacity:0;pointer-events:none}
+  .seg span{display:block;text-align:center;padding:10px 4px;border-radius:9px;font-size:14px;color:var(--muted);cursor:pointer}
+  .seg input:checked + span{background:#1f6feb;color:#fff;font-weight:600}
   .hint{font-size:12px;color:var(--muted);margin-top:4px}
   .toggle{display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-top:1px solid var(--line);font-size:15px}
   input[type=checkbox]{width:22px;height:22px;accent-color:var(--accent)}
@@ -95,7 +101,7 @@
       <circle id="ring" class="ringfg" cx="60" cy="60" r="52"
               transform="rotate(-90 60 60)" stroke-dasharray="326.7" stroke-dashoffset="326.7"></circle>
     </svg>
-    <div id="ringTxt"><b id="distTxt">–</b><span>m from start</span></div>
+    <div id="ringTxt"><b id="ringMain">–</b><span id="ringLabel">m from start</span><span id="ringSub"></span></div>
   </div>
 
   <div class="stats">
@@ -124,17 +130,37 @@
   <div class="dlg-body">
     <h2>Settings</h2>
 
-    <label class="field">
-      <div class="lbl"><span>Start-zone radius</span><i id="vRadius">25 m</i></div>
-      <input type="range" id="sRadius" min="8" max="60" step="1">
-      <div class="hint">A round is counted when you come back inside this circle. Make it a bit bigger than your GPS accuracy.</div>
-    </label>
+    <div class="seg">
+      <label><input type="radio" name="mode" value="loop"><span>Full circle</span></label>
+      <label><input type="radio" name="mode" value="zone"><span>Return to zone</span></label>
+    </div>
+    <p class="hint" id="modeHint"></p>
 
-    <label class="field">
-      <div class="lbl"><span>Must go at least this far away</span><i id="vAway">35 m</i></div>
-      <input type="range" id="sAway" min="15" max="200" step="5">
-      <div class="hint">Stops GPS wobble at the start point from counting fake rounds.</div>
-    </label>
+    <div id="loopFields">
+      <label class="field">
+        <div class="lbl"><span>Count a round after turning</span><i id="vTurn">350°</i></div>
+        <input type="range" id="sTurn" min="300" max="360" step="5">
+        <div class="hint">350° means the last few steps back to the exact spot aren't needed. Lower it if rounds feel late.</div>
+      </label>
+      <label class="field">
+        <div class="lbl"><span>Ignore wobble within</span><i id="vDead">6 m</i></div>
+        <input type="range" id="sDead" min="2" max="15" step="1">
+        <div class="hint">Standing this close to the start point, GPS noise spins the direction wildly, so the angle is held steady instead of counted.</div>
+      </label>
+    </div>
+
+    <div id="zoneFields">
+      <label class="field">
+        <div class="lbl"><span>Start-zone radius</span><i id="vRadius">12 m</i></div>
+        <input type="range" id="sRadius" min="2" max="60" step="1">
+        <div class="hint" id="radiusHint"></div>
+      </label>
+      <label class="field">
+        <div class="lbl"><span>Must go at least this far away</span><i id="vAway">35 m</i></div>
+        <input type="range" id="sAway" min="15" max="200" step="5">
+        <div class="hint">Stops GPS wobble at the start point from counting fake rounds.</div>
+      </label>
+    </div>
 
     <label class="field">
       <div class="lbl"><span>Minimum time per round</span><i id="vMin">25 s</i></div>
@@ -172,7 +198,10 @@
   var KEY = DEMO ? 'pradakshina.demo.v1' : 'pradakshina.v1';   // demo never touches real data
 
   var DEFAULTS = {
-    radius:25, away:35, minLap:25,
+    mode:'loop',                 // 'loop' = full circle around the start point; 'zone' = re-enter a circle
+    turn:350, dead:6,            // loop mode: degrees that count as a round, and the wobble dead-zone
+    radius:12, away:35,          // zone mode
+    minLap:25,
     voice:true, beep:true, vibe:true, wake:true
   };
 
@@ -184,12 +213,16 @@
     startedAt: null,             // ms, when Start was pressed
     accumMs: 0,                  // time from previous run segments
     lastLapAt: null,             // ms
+    accum: 0,                    // degrees turned around the start point this round
     running: false
   };
 
   var watchId = null, wakeLock = null, audioCtx = null;
-  var zone = 'unknown';          // 'in' | 'out'
+  var zone = 'unknown';          // 'in' | 'out'  (zone mode)
   var maxAway = 0;               // furthest distance from anchor this lap
+  var lastBear = null;           // last accepted bearing from anchor, degrees
+  var lastBearPt = null;         // where that bearing was taken
+  var STEP = 3;                  // metres of real movement before a new bearing is trusted
   var lastFix = null;
   var anchorSamples = null;      // averaging buffer while setting anchor
 
@@ -214,6 +247,14 @@
     var dLon = (lon - a.lon) * 111320 * Math.cos(a.lat * Math.PI/180);
     return Math.sqrt(dLat*dLat + dLon*dLon);
   }
+
+  function bearingFrom(a, lat, lon){
+    var dLat = (lat - a.lat) * 110574;
+    var dLon = (lon - a.lon) * 111320 * Math.cos(a.lat * Math.PI/180);
+    return Math.atan2(dLon, dLat) * 180/Math.PI;    // 0 = north, + = clockwise
+  }
+  function norm180(d){ return ((d + 180) % 360 + 360) % 360 - 180; }
+  function resetRound(){ S.accum = 0; lastBear = null; lastBearPt = null; zone = 'in'; maxAway = 0; }
 
   /* ---------- formatting ---------- */
   function mmss(ms){
@@ -305,12 +346,24 @@
     $('ringWrap').className = S.anchor ? 'on' : '';
   }
   function paintRing(dist, acc){
-    var R = S.cfg.radius;
-    var frac = Math.max(0, Math.min(1, dist / Math.max(R * 3, S.cfg.away)));
+    var frac, done;
+    if(S.cfg.mode === 'loop'){
+      done = Math.abs(S.accum);
+      frac = Math.max(0, Math.min(1, done / S.cfg.turn));
+      $('ringMain').textContent = Math.round(done) + '\u00B0';
+      $('ringLabel').textContent = 'around the start point';
+      $('ringSub').textContent = Math.round(dist) + ' m away';
+      $('ring').style.stroke = frac >= 0.95 ? 'var(--ok)' : 'var(--accent)';
+    } else {
+      var R = S.cfg.radius;
+      frac = Math.max(0, Math.min(1, dist / Math.max(R * 3, S.cfg.away)));
+      $('ringMain').textContent = Math.round(dist);
+      $('ringLabel').textContent = 'm from start';
+      $('ringSub').textContent = dist <= R ? 'inside the start zone' : '';
+      $('ring').style.stroke = dist <= R ? 'var(--ok)' : 'var(--accent)';
+    }
     var C = 2 * Math.PI * 52;
     $('ring').setAttribute('stroke-dashoffset', String(C * (1 - frac)));
-    $('ring').style.stroke = dist <= R ? 'var(--ok)' : 'var(--accent)';
-    $('distTxt').textContent = Math.round(dist);
     $('gpsPill').textContent = 'GPS ±' + Math.round(acc) + ' m';
     $('gpsPill').style.color = acc <= 15 ? 'var(--ok)' : (acc <= 30 ? 'var(--warn)' : 'var(--bad)');
   }
@@ -329,7 +382,7 @@
         for(var i=0;i<anchorSamples.length;i++){ la += anchorSamples[i].latitude; lo += anchorSamples[i].longitude; }
         S.anchor = { lat: la/anchorSamples.length, lon: lo/anchorSamples.length };
         anchorSamples = null;
-        zone = 'in'; maxAway = 0;
+        resetRound();
         $('state').textContent = 'Start point saved. Tap Start, pocket the phone, and walk.';
         banner('');
         buzz(40); beep(1);
@@ -346,12 +399,54 @@
 
     if(!S.running){ $('state').textContent = 'Paused — tap Start to resume counting.'; return; }
 
-    // Ignore junk fixes; a 100 m error can otherwise fake a whole lap.
+    // Ignore junk fixes; a 100 m error can otherwise fake a whole round.
     if(c.accuracy > 45){
       $('state').textContent = 'Weak GPS signal (±' + Math.round(c.accuracy) + ' m) — waiting for a better fix.';
       return;
     }
 
+    if(S.cfg.mode === 'loop') stepLoop(c, dist, now);
+    else                      stepZone(c, dist, now);
+  }
+
+  /* Loop mode: a round = a full turn around the start point.
+     Nothing here depends on walking back over an exact spot, so stepping wide
+     around someone standing there still completes the circle. */
+  function stepLoop(c, dist, now){
+    var done = Math.abs(S.accum);
+
+    // Right on top of the start point the bearing is meaningless — GPS noise
+    // would spin it wildly. Hold the angle steady until we're clear of it.
+    if(dist < S.cfg.dead){
+      lastBear = null; lastBearPt = null;
+      $('state').textContent = 'At the start point — ' + Math.round(done) + '° of this round done.';
+      return;
+    }
+
+    var b = bearingFrom(S.anchor, c.latitude, c.longitude);
+    if(lastBearPt === null || metersFrom(lastBearPt, c.latitude, c.longitude) >= STEP){
+      if(lastBear !== null){
+        var d = norm180(b - lastBear);
+        if(Math.abs(d) < 100) S.accum += d;   // a bigger jump than that is a bad fix, not a walk
+      }
+      lastBear = b;
+      lastBearPt = { lat: c.latitude, lon: c.longitude };
+      done = Math.abs(S.accum);
+    }
+
+    if(done >= S.cfg.turn){
+      var since = S.lastLapAt ? (now - S.lastLapAt) : (now - (S.startedAt || now));
+      if(since >= S.cfg.minLap * 1000){
+        S.accum -= (S.accum > 0 ? 360 : -360);  // carry the remainder into the next round
+        countLap(now, since);
+        return;
+      }
+    }
+    $('state').textContent = 'Round ' + (S.count + 1) + ' — ' + Math.round(done) + '° of ' + S.cfg.turn + '°';
+  }
+
+  /* Zone mode: a round = leave a circle around the start point and come back into it. */
+  function stepZone(c, dist, now){
     var R = S.cfg.radius;
     var exitR = R + 8;               // hysteresis so you don't flicker on the edge
 
@@ -365,7 +460,6 @@
         if(maxAway >= S.cfg.away && since >= S.cfg.minLap * 1000){
           countLap(now, since);
         } else {
-          // Came back too soon or never went far enough — treat as still the same lap.
           zone = 'in';
           $('state').textContent = maxAway < S.cfg.away
             ? 'Back at start, but only went ' + Math.round(maxAway) + ' m out — not counted.'
@@ -384,6 +478,7 @@
     S.laps.push({ n: S.count, at: now, dur: dur });
     S.lastLapAt = now;
     zone = 'in'; maxAway = 0;
+    if(S.cfg.mode !== 'loop'){ S.accum = 0; lastBear = null; lastBearPt = null; }
     save(); render();
     $('state').textContent = 'Round ' + S.count + ' complete.';
     buzz([0, 120, 80, 120]);
@@ -436,7 +531,7 @@
       S.running = true;
       S.startedAt = Date.now();
       if(!S.lastLapAt) S.lastLapAt = S.startedAt;
-      zone = 'in'; maxAway = 0;
+      resetRound();
       startWatch(); requestWake();
       $('state').textContent = 'Counting. Put the phone in your pocket and walk.';
       say('Counting started');
@@ -451,7 +546,7 @@
     if(!confirm('Reset the count and timer to zero? (Your start point is kept.)')) return;
     S.count = 0; S.laps = []; S.accumMs = 0; S.lastLapAt = null;
     S.startedAt = S.running ? Date.now() : null;
-    zone = 'in'; maxAway = 0;
+    resetRound();
     save(); render();
     $('state').textContent = 'Reset. Ready.';
   };
@@ -459,11 +554,13 @@
   /* settings dialog */
   function bindRange(id, key, unit, out){
     var el = $(id);
+    var sep = unit === '\u00B0' ? '' : ' ';
     el.value = S.cfg[key];
-    $(out).textContent = S.cfg[key] + ' ' + unit;
+    $(out).textContent = S.cfg[key] + sep + unit;
     el.oninput = function(){
       S.cfg[key] = Number(el.value);
-      $(out).textContent = S.cfg[key] + ' ' + unit;
+      $(out).textContent = S.cfg[key] + sep + unit;
+      if(key === 'radius') radiusHint();
       save();
     };
   }
@@ -475,12 +572,47 @@
       if(key === 'wake'){ el.checked && S.running ? requestWake() : releaseWake(); }
     };
   }
+  function applyMode(){
+    var loop = S.cfg.mode === 'loop';
+    $('loopFields').style.display = loop ? 'block' : 'none';
+    $('zoneFields').style.display = loop ? 'none'  : 'block';
+    $('modeHint').innerHTML = loop
+      ? 'A round is counted when you have gone all the way around the start point. It does not matter how wide you swing — if somebody is standing on your spot, walking around them still completes the circle.'
+      : 'A round is counted when you leave a circle around the start point and step back into it. Simple, but a tight radius can be missed by GPS.';
+    radiusHint();
+  }
+  function radiusHint(){
+    var acc = lastFix ? Math.round(lastFix.accuracy) : null;
+    var R = S.cfg.radius, h = $('radiusHint');
+    if(!h) return;
+    var txt = 'How close you must come back to count a round.';
+    if(acc !== null){
+      txt += ' Your GPS right now reads \u00B1' + acc + ' m.';
+      if(R < acc) txt += ' \u26A0\uFE0F That is finer than your GPS can see — rounds will be missed. Use Full circle mode instead.';
+    } else if(R < 8){
+      txt += ' \u26A0\uFE0F Below about 8 m, phone GPS cannot reliably tell you are back. Use Full circle mode instead.';
+    }
+    h.textContent = txt;
+    h.style.color = (acc !== null && R < acc) || R < 8 ? 'var(--warn)' : 'var(--muted)';
+  }
   $('btnSettings').onclick = function(){
+    var radios = document.querySelectorAll('input[name=mode]');
+    for(var i=0;i<radios.length;i++){
+      radios[i].checked = (radios[i].value === S.cfg.mode);
+      radios[i].onchange = function(){
+        S.cfg.mode = this.value;
+        resetRound();                 // don't carry a half-finished round across modes
+        save(); applyMode(); render();
+      };
+    }
+    bindRange('sTurn','turn','\u00B0','vTurn');
+    bindRange('sDead','dead','m','vDead');
     bindRange('sRadius','radius','m','vRadius');
     bindRange('sAway','away','m','vAway');
     bindRange('sMin','minLap','s','vMin');
     bindCheck('cVoice','voice'); bindCheck('cBeep','beep');
     bindCheck('cVibe','vibe');   bindCheck('cWake','wake');
+    applyMode();
     $('dlgSettings').showModal();
   };
   $('btnCloseSettings').onclick = function(){ $('dlgSettings').close(); };
@@ -534,19 +666,21 @@
 
   window.addEventListener('beforeunload', save);
 
-  /* ---------- demo mode: ?demo=1 walks a fake circle so you can test indoors ---------- */
+  /* ---------- demo mode: ?demo=1 walks a fake loop so you can test indoors ---------- */
   if(DEMO){
     var t = 0, base = { lat: 33.1507, lon: -96.8236 };   // Frisco, TX area
     S.anchor = S.anchor || base;
-    S.cfg.minLap = 8; S.cfg.away = 30;                   // fake laps are quick
-    banner('DEMO MODE — simulated walking, no real GPS. Tap Start.');
+    S.cfg.minLap = 8;                                    // fake rounds are quick
+    banner('DEMO MODE \u2014 simulated walking, no real GPS. Tap Start.');
     render();
     setInterval(function(){
       t += 0.25;
-      var r = 0.00055;                                    // ~60 m circle
+      // A 28 m loop whose centre sits 20 m north of the start point, so the
+      // start point is genuinely inside the loop (8 m away at the near side,
+      // 48 m at the far side) — the shape of a real pradakshina path.
       onFix({ timestamp: Date.now(), coords: {
-        latitude:  S.anchor.lat + r * (1 - Math.cos(t)),
-        longitude: S.anchor.lon + r * Math.sin(t) * 1.19,
+        latitude:  S.anchor.lat + 0.000181 + 0.000253 * Math.cos(t),
+        longitude: S.anchor.lon + 0.000300 * Math.sin(t),
         accuracy: 8
       }});
     }, 500);

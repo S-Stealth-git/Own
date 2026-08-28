@@ -10,13 +10,14 @@ start point is wherever you stand when you press the button, so it works anywher
 
 ## What it does
 
-- **Automatic counting** — GPS geofence around your start point. Leave the circle,
-  go at least a minimum distance away, come back in → +1 round.
+- **Automatic counting** — it counts a **full turn around your start point**, not a
+  return to an exact spot. Swing as wide as you like around someone standing
+  there; the circle still completes and the round still counts.
 - **Speaks the count** ("one", "two", "three"…), beeps twice and vibrates, so you
   get confirmation without taking the phone out.
-- **Anti-miscount rules** — a round only counts if you actually went far enough
-  away *and* enough time passed, and fixes with bad GPS accuracy are thrown out.
-  Standing at the start point while GPS wobbles will not add rounds.
+- **Anti-miscount rules** — GPS noise close to the start point is ignored, wild
+  jumps are discarded as bad fixes, low-accuracy readings are thrown out, and a
+  minimum time per round applies. Standing still will not add rounds.
 - **Timer** — total time, last round, average round. That's your production-hours
   number at the end.
 - **Round log** — time of day and duration for each round; Copy gives you CSV.
@@ -24,6 +25,42 @@ start point is wherever you stand when you press the button, so it works anywher
 - **Survives a reload** — count, timer, log and start point are saved on the phone.
 - **Works offline** — installable (Add to Home Screen) and cached, so patchy
   signal at the temple doesn't matter. GPS itself needs no data connection.
+
+## The two counting modes
+
+### Full circle (default — use this)
+
+A round is counted when you have turned a full **350°** around the saved start
+point. The app tracks the *direction* from your start point to you, and adds up
+how much that direction has swept. One lap of the temple = one full sweep,
+whatever shape you walk.
+
+This is deliberately independent of any radius, which is what makes it robust:
+
+- Somebody standing on your exact spot? Walk 2 m or 20 m around them — still 360°.
+- A wide day and a tight day count identically.
+- GPS being off by 10 m barely moves the angle when you're 30 m out.
+
+Two knobs:
+
+| Setting | Default | What it does |
+|---|---|---|
+| Count a round after turning | 350° | The 10° of slack means you don't have to walk the last couple of steps back onto the exact spot. |
+| Ignore wobble within | 6 m | Standing right on top of the start point, the *direction* from it to you flips randomly with GPS noise. Inside this distance the angle is frozen rather than counted. |
+
+### Return to zone (the simple alternative)
+
+The classic geofence: leave a circle around the start point, go a minimum
+distance away, step back into the circle → +1. Easy to picture, but it depends on
+GPS actually placing you back inside a small circle, so a detour around a person
+can miss a round. Radius goes down to 2 m if you want it, but the app will warn
+you when you set it finer than your phone's live GPS accuracy.
+
+**Why not a 0.5 m or 2 m radius?** Phone GPS is accurate to about ±5–15 m
+outdoors, and worse beside a building. A 2 m circle is smaller than the error, so
+your phone often does not know you're inside it and rounds get skipped. The
+full-circle mode exists precisely so you get exact counting without depending on
+a precision the hardware doesn't have.
 
 ## Deploy it (pick one — both are free)
 
@@ -89,13 +126,14 @@ that makes it miss a count. (The manual **+1** button is there for that case.)
 
 | Setting | Default | What to change it to |
 |---|---|---|
-| Start-zone radius | 25 m | Bigger (30–40 m) if rounds get missed; smaller (15 m) if your GPS reads ±5 m and the path is tight. Keep it above your typical GPS accuracy shown in the top-right pill. |
-| Must go at least this far away | 35 m | Set it to about half the width of your circuit. If your loop is small, lower it; if you get phantom counts while standing still, raise it. |
+| Count a round after turning | 350° | Drop to 330–340° if rounds register later than they feel. |
+| Ignore wobble within | 6 m | Raise it if your path passes very close to the start point and the count stalls there; lower it only if your loop is tiny. |
 | Minimum time per round | 25 s | Slightly less than your fastest realistic round. |
+| Start-zone radius *(zone mode)* | 12 m | Keep it at or above the accuracy shown in the top-right pill. |
+| Must go at least this far away *(zone mode)* | 35 m | About half the narrow width of your circuit. |
 
-Rule of thumb: **radius ≈ your GPS accuracy + 10 m**, and **away distance ≈ 40–60%
-of the loop's smallest width**. Watch the top-right pill — green (±≤15 m) is good,
-red means the sky view is poor (indoors, under a roof, next to a tall wall).
+Watch the top-right pill — green (±≤15 m) is good, red means the sky view is poor
+(under a roof, tight against a wall).
 
 ## Test it without walking
 
@@ -114,16 +152,29 @@ you can watch the counter, hear the voice, and check your settings from your cou
 
 ## How the counting logic works
 
-The app converts each GPS fix into a straight-line distance from your saved start
-point, then runs a small state machine:
+Fixes with accuracy worse than ±45 m are discarded in both modes — a single bad
+fix can otherwise look like a whole lap.
+
+### Full circle mode (winding angle)
+
+1. For each GPS fix, compute the compass bearing from the start point to you.
+2. A new bearing is only trusted after you have genuinely moved 3 m from where the
+   last one was taken — that filters standing-still jitter.
+3. Add the signed change in bearing to a running total. Because the changes are
+   signed, random wobble cancels out; only actually going *around* accumulates.
+4. A change larger than 100° between two readings is thrown away as a bad fix
+   rather than a walk.
+5. Within the "ignore wobble" distance of the start point, the angle is frozen —
+   the bearing is meaningless up close.
+6. Total ≥ 350° (and past the minimum round time) → count a round, then subtract a
+   full 360° so the next round is measured from the same registration and the
+   count can't drift over an hour.
+
+### Zone mode (geofence)
 
 1. **inside** → you're within the radius.
-2. You cross past `radius + 8 m` (the extra 8 m is hysteresis, so hovering on the
-   edge can't flicker the count) → state becomes **outside**, and it starts
-   tracking the furthest distance you reach.
-3. Back within the radius → it counts a round **only if** the furthest distance
-   reached ≥ the "must go this far away" setting **and** the time since the last
-   round ≥ the minimum. Otherwise it silently resets to inside and says why.
-
-Fixes with accuracy worse than ±45 m are ignored entirely, since a single bad fix
-can otherwise look like a whole lap.
+2. Cross past `radius + 8 m` (hysteresis, so hovering on the edge can't flicker) →
+   **outside**, and it tracks the furthest distance you reach.
+3. Back within the radius → counts a round only if the furthest distance ≥ the
+   "must go this far away" setting and the time since the last round ≥ the
+   minimum. Otherwise it resets quietly and tells you why.

@@ -1,0 +1,557 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0d1117">
+<title>Pradakshina Lap Counter</title>
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Laps">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-180.png">
+<style>
+  :root{
+    --bg:#0d1117; --panel:#161b22; --line:#283041;
+    --ink:#e6edf3; --muted:#8b949e;
+    --ok:#3fb950; --warn:#d29922; --bad:#f85149; --accent:#58a6ff;
+    --safe-b: env(safe-area-inset-bottom, 0px);
+  }
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent}
+  html,body{margin:0;height:100%}
+  body{
+    background:var(--bg); color:var(--ink);
+    font:16px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    display:flex; flex-direction:column; overscroll-behavior:none; overflow:hidden;
+    padding: env(safe-area-inset-top) env(safe-area-inset-right) var(--safe-b) env(safe-area-inset-left);
+  }
+  header{display:flex;align-items:center;justify-content:space-between;padding:10px 14px;border-bottom:1px solid var(--line)}
+  header h1{font-size:15px;margin:0;font-weight:600;letter-spacing:.2px}
+  #gpsPill{font-size:12px;padding:4px 9px;border-radius:999px;background:#21262d;border:1px solid var(--line);color:var(--muted);white-space:nowrap}
+  main{flex:1;min-height:0;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:8px 14px;gap:6px}
+  #count{font-size:min(42vw,20vh,190px);line-height:.92;font-weight:800;font-variant-numeric:tabular-nums;letter-spacing:-4px}
+  #countLabel{color:var(--muted);font-size:13px;letter-spacing:2px;text-transform:uppercase}
+  #state{font-size:14px;color:var(--muted);min-height:22px;text-align:center}
+  .stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;width:100%;max-width:520px;margin-top:6px}
+  .stat{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:8px 6px;text-align:center}
+  .stat b{display:block;font-size:20px;font-variant-numeric:tabular-nums;font-weight:700}
+  .stat span{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.8px}
+  /* distance ring */
+  #ringWrap{width:min(70vw,30vh,280px);aspect-ratio:1;position:relative;display:none;flex:0 0 auto}
+  #ringWrap.on{display:block}
+  svg{width:100%;height:100%;display:block}
+  .ringbg{fill:none;stroke:#21262d;stroke-width:10}
+  .ringfg{fill:none;stroke:var(--accent);stroke-width:10;stroke-linecap:round;transition:stroke-dashoffset .4s linear,stroke .3s}
+  #ringTxt{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px}
+  #ringTxt b{font-size:34px;font-variant-numeric:tabular-nums}
+  #ringTxt span{font-size:12px;color:var(--muted)}
+  footer{padding:10px 14px calc(10px + var(--safe-b));border-top:1px solid var(--line);display:flex;flex-direction:column;gap:8px}
+  .row{display:flex;gap:8px}
+  button{
+    flex:1;font:inherit;font-weight:600;color:var(--ink);background:var(--panel);
+    border:1px solid var(--line);border-radius:12px;padding:14px 10px;cursor:pointer;touch-action:manipulation
+  }
+  button:active{transform:translateY(1px)}
+  button[disabled]{opacity:.4}
+  .primary{background:#1f6feb;border-color:#1f6feb}
+  .good{background:#238636;border-color:#238636}
+  .ghost{background:transparent;color:var(--muted)}
+  .small{padding:10px 8px;font-size:14px;font-weight:500}
+  dialog{border:1px solid var(--line);background:var(--panel);color:var(--ink);border-radius:16px;padding:0;width:min(94vw,440px);max-height:86vh}
+  dialog::backdrop{background:rgba(0,0,0,.6)}
+  .dlg-body{padding:16px;overflow:auto;max-height:70vh}
+  .dlg-body h2{margin:0 0 12px;font-size:17px}
+  label.field{display:block;margin:14px 0}
+  label.field .lbl{display:flex;justify-content:space-between;font-size:14px;margin-bottom:6px}
+  label.field .lbl i{font-style:normal;color:var(--accent);font-variant-numeric:tabular-nums}
+  input[type=range]{width:100%;accent-color:var(--accent)}
+  .hint{font-size:12px;color:var(--muted);margin-top:4px}
+  .toggle{display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-top:1px solid var(--line);font-size:15px}
+  input[type=checkbox]{width:22px;height:22px;accent-color:var(--accent)}
+  .dlg-foot{padding:12px 16px;border-top:1px solid var(--line);display:flex;gap:8px}
+  #log{list-style:none;margin:0;padding:0;font-variant-numeric:tabular-nums}
+  #log li{display:flex;justify-content:space-between;padding:8px 2px;border-bottom:1px solid var(--line);font-size:14px}
+  #log li span{color:var(--muted)}
+  .banner{background:#341a00;border:1px solid #7a4b00;color:#ffce7a;font-size:13px;border-radius:10px;padding:8px 10px;display:none}
+  .banner.on{display:block}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Pradakshina Counter</h1>
+  <div id="gpsPill">GPS: off</div>
+</header>
+
+<main>
+  <div id="count">0</div>
+  <div id="countLabel">rounds</div>
+  <div id="state">Tap “Set start point” where you begin.</div>
+
+  <div id="ringWrap">
+    <svg viewBox="0 0 120 120" aria-hidden="true">
+      <circle class="ringbg" cx="60" cy="60" r="52"></circle>
+      <circle id="ring" class="ringfg" cx="60" cy="60" r="52"
+              transform="rotate(-90 60 60)" stroke-dasharray="326.7" stroke-dashoffset="326.7"></circle>
+    </svg>
+    <div id="ringTxt"><b id="distTxt">–</b><span>m from start</span></div>
+  </div>
+
+  <div class="stats">
+    <div class="stat"><b id="elapsed">0:00</b><span>time</span></div>
+    <div class="stat"><b id="lastLap">–</b><span>last round</span></div>
+    <div class="stat"><b id="avgLap">–</b><span>avg round</span></div>
+  </div>
+</main>
+
+<footer>
+  <div id="banner" class="banner"></div>
+  <div class="row">
+    <button id="btnAnchor" class="primary">Set start point</button>
+    <button id="btnStart" class="good" disabled>Start</button>
+  </div>
+  <div class="row">
+    <button id="btnMinus" class="small ghost">− 1</button>
+    <button id="btnPlus" class="small ghost">+ 1</button>
+    <button id="btnLog" class="small ghost">Log</button>
+    <button id="btnSettings" class="small ghost">Settings</button>
+    <button id="btnReset" class="small ghost">Reset</button>
+  </div>
+</footer>
+
+<dialog id="dlgSettings">
+  <div class="dlg-body">
+    <h2>Settings</h2>
+
+    <label class="field">
+      <div class="lbl"><span>Start-zone radius</span><i id="vRadius">25 m</i></div>
+      <input type="range" id="sRadius" min="8" max="60" step="1">
+      <div class="hint">A round is counted when you come back inside this circle. Make it a bit bigger than your GPS accuracy.</div>
+    </label>
+
+    <label class="field">
+      <div class="lbl"><span>Must go at least this far away</span><i id="vAway">35 m</i></div>
+      <input type="range" id="sAway" min="15" max="200" step="5">
+      <div class="hint">Stops GPS wobble at the start point from counting fake rounds.</div>
+    </label>
+
+    <label class="field">
+      <div class="lbl"><span>Minimum time per round</span><i id="vMin">25 s</i></div>
+      <input type="range" id="sMin" min="5" max="180" step="5">
+      <div class="hint">Anything faster than this is ignored.</div>
+    </label>
+
+    <div class="toggle"><span>Speak the count out loud</span><input type="checkbox" id="cVoice"></div>
+    <div class="toggle"><span>Beep on each round</span><input type="checkbox" id="cBeep"></div>
+    <div class="toggle"><span>Vibrate on each round</span><input type="checkbox" id="cVibe"></div>
+    <div class="toggle"><span>Keep screen awake</span><input type="checkbox" id="cWake"></div>
+    <p class="hint" style="margin-top:14px">Phone in your pocket: leave the screen ON (keep-awake handles it). Browsers pause GPS when the screen is off, so the count would stall.</p>
+  </div>
+  <div class="dlg-foot"><button class="small" id="btnCloseSettings">Done</button></div>
+</dialog>
+
+<dialog id="dlgLog">
+  <div class="dlg-body">
+    <h2>Round log</h2>
+    <ul id="log"></ul>
+    <p class="hint" id="logEmpty">No rounds yet.</p>
+  </div>
+  <div class="dlg-foot">
+    <button class="small" id="btnCopy">Copy</button>
+    <button class="small" id="btnCloseLog">Close</button>
+  </div>
+</dialog>
+
+<script>
+(function(){
+  'use strict';
+
+  var $ = function(id){ return document.getElementById(id); };
+  var DEMO = new URLSearchParams(location.search).get('demo') === '1';
+  var KEY = DEMO ? 'pradakshina.demo.v1' : 'pradakshina.v1';   // demo never touches real data
+
+  var DEFAULTS = {
+    radius:25, away:35, minLap:25,
+    voice:true, beep:true, vibe:true, wake:true
+  };
+
+  var S = {                      // persisted session
+    cfg: Object.assign({}, DEFAULTS),
+    anchor: null,                // {lat, lon}
+    count: 0,
+    laps: [],                    // [{n, at, dur}]
+    startedAt: null,             // ms, when Start was pressed
+    accumMs: 0,                  // time from previous run segments
+    lastLapAt: null,             // ms
+    running: false
+  };
+
+  var watchId = null, wakeLock = null, audioCtx = null;
+  var zone = 'unknown';          // 'in' | 'out'
+  var maxAway = 0;               // furthest distance from anchor this lap
+  var lastFix = null;
+  var anchorSamples = null;      // averaging buffer while setting anchor
+
+  /* ---------- storage ---------- */
+  function save(){
+    try{ localStorage.setItem(KEY, JSON.stringify(S)); }catch(e){}
+  }
+  function load(){
+    try{
+      var raw = localStorage.getItem(KEY);
+      if(!raw) return;
+      var o = JSON.parse(raw);
+      S = Object.assign(S, o);
+      S.cfg = Object.assign({}, DEFAULTS, o.cfg || {});
+      S.running = false;                 // never auto-resume tracking
+    }catch(e){}
+  }
+
+  /* ---------- geo math (flat-earth is plenty accurate at this scale) ---------- */
+  function metersFrom(a, lat, lon){
+    var dLat = (lat - a.lat) * 110574;
+    var dLon = (lon - a.lon) * 111320 * Math.cos(a.lat * Math.PI/180);
+    return Math.sqrt(dLat*dLat + dLon*dLon);
+  }
+
+  /* ---------- formatting ---------- */
+  function mmss(ms){
+    if(ms == null || !isFinite(ms)) return '–';
+    var s = Math.round(ms/1000), m = Math.floor(s/60);
+    var h = Math.floor(m/60); s = s%60; m = m%60;
+    var p = function(n){ return (n<10?'0':'') + n; };
+    return h > 0 ? (h + ':' + p(m) + ':' + p(s)) : (m + ':' + p(s));
+  }
+
+  /* ---------- feedback ---------- */
+  function unlockAudio(){
+    try{
+      var C = window.AudioContext || window.webkitAudioContext;
+      if(!C) return;
+      if(!audioCtx) audioCtx = new C();
+      if(audioCtx.state === 'suspended') audioCtx.resume();
+      // prime the speech engine on iOS with a silent utterance
+      if(window.speechSynthesis){
+        var u = new SpeechSynthesisUtterance(' ');
+        u.volume = 0; speechSynthesis.speak(u);
+      }
+    }catch(e){}
+  }
+  function beep(times){
+    if(!S.cfg.beep || !audioCtx) return;
+    var t0 = audioCtx.currentTime;
+    for(var i=0;i<(times||1);i++){
+      var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+      o.type='sine'; o.frequency.value = 880;
+      g.gain.setValueAtTime(0.0001, t0 + i*0.22);
+      g.gain.exponentialRampToValueAtTime(0.35, t0 + i*0.22 + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001, t0 + i*0.22 + 0.18);
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(t0 + i*0.22); o.stop(t0 + i*0.22 + 0.2);
+    }
+  }
+  function say(text){
+    if(!S.cfg.voice || !window.speechSynthesis) return;
+    try{
+      var u = new SpeechSynthesisUtterance(text);
+      u.rate = 0.95; u.volume = 1;
+      speechSynthesis.speak(u);
+    }catch(e){}
+  }
+  function buzz(pattern){
+    if(S.cfg.vibe && navigator.vibrate) try{ navigator.vibrate(pattern); }catch(e){}
+  }
+
+  /* ---------- wake lock ---------- */
+  function requestWake(){
+    if(!S.cfg.wake || !('wakeLock' in navigator)) return;
+    navigator.wakeLock.request('screen').then(function(l){
+      wakeLock = l;
+      l.addEventListener('release', function(){ wakeLock = null; });
+    }).catch(function(){});
+  }
+  function releaseWake(){
+    if(wakeLock){ try{ wakeLock.release(); }catch(e){} wakeLock = null; }
+  }
+  document.addEventListener('visibilitychange', function(){
+    if(document.visibilityState === 'visible' && S.running && !wakeLock) requestWake();
+  });
+
+  /* ---------- UI ---------- */
+  function banner(msg){
+    var b = $('banner');
+    if(!msg){ b.className='banner'; b.textContent=''; return; }
+    b.className='banner on'; b.textContent = msg;
+  }
+  function render(){
+    $('count').textContent = S.count;
+
+    var totalMs = S.accumMs + (S.running && S.startedAt ? Date.now() - S.startedAt : 0);
+    $('elapsed').textContent = mmss(totalMs);
+
+    var last = S.laps.length ? S.laps[S.laps.length-1].dur : null;
+    $('lastLap').textContent = mmss(last);
+    if(S.laps.length){
+      var sum = 0, n = 0;
+      for(var i=0;i<S.laps.length;i++){ if(S.laps[i].dur){ sum += S.laps[i].dur; n++; } }
+      $('avgLap').textContent = n ? mmss(sum/n) : '–';
+    } else $('avgLap').textContent = '–';
+
+    $('btnStart').disabled = !S.anchor;
+    $('btnStart').textContent = S.running ? 'Pause' : (S.startedAt || S.accumMs ? 'Resume' : 'Start');
+    $('btnStart').className = S.running ? 'good' : 'good';
+    $('btnAnchor').textContent = S.anchor ? 'Reset start point' : 'Set start point';
+    $('ringWrap').className = S.anchor ? 'on' : '';
+  }
+  function paintRing(dist, acc){
+    var R = S.cfg.radius;
+    var frac = Math.max(0, Math.min(1, dist / Math.max(R * 3, S.cfg.away)));
+    var C = 2 * Math.PI * 52;
+    $('ring').setAttribute('stroke-dashoffset', String(C * (1 - frac)));
+    $('ring').style.stroke = dist <= R ? 'var(--ok)' : 'var(--accent)';
+    $('distTxt').textContent = Math.round(dist);
+    $('gpsPill').textContent = 'GPS ±' + Math.round(acc) + ' m';
+    $('gpsPill').style.color = acc <= 15 ? 'var(--ok)' : (acc <= 30 ? 'var(--warn)' : 'var(--bad)');
+  }
+
+  /* ---------- lap engine ---------- */
+  function onFix(pos){
+    var c = pos.coords, now = pos.timestamp || Date.now();
+    lastFix = c;
+
+    // Averaging phase: we're establishing the start point.
+    if(anchorSamples){
+      if(c.accuracy <= 40) anchorSamples.push(c);
+      $('state').textContent = 'Locking start point… ' + anchorSamples.length + '/5 (±' + Math.round(c.accuracy) + ' m)';
+      if(anchorSamples.length >= 5){
+        var la = 0, lo = 0;
+        for(var i=0;i<anchorSamples.length;i++){ la += anchorSamples[i].latitude; lo += anchorSamples[i].longitude; }
+        S.anchor = { lat: la/anchorSamples.length, lon: lo/anchorSamples.length };
+        anchorSamples = null;
+        zone = 'in'; maxAway = 0;
+        $('state').textContent = 'Start point saved. Tap Start, pocket the phone, and walk.';
+        banner('');
+        buzz(40); beep(1);
+        save(); render();
+        if(!S.running) stopWatch();     // idle again until Start
+      }
+      return;
+    }
+
+    if(!S.anchor) return;
+
+    var dist = metersFrom(S.anchor, c.latitude, c.longitude);
+    paintRing(dist, c.accuracy);
+
+    if(!S.running){ $('state').textContent = 'Paused — tap Start to resume counting.'; return; }
+
+    // Ignore junk fixes; a 100 m error can otherwise fake a whole lap.
+    if(c.accuracy > 45){
+      $('state').textContent = 'Weak GPS signal (±' + Math.round(c.accuracy) + ' m) — waiting for a better fix.';
+      return;
+    }
+
+    var R = S.cfg.radius;
+    var exitR = R + 8;               // hysteresis so you don't flicker on the edge
+
+    if(zone !== 'out' && dist > exitR){
+      zone = 'out'; maxAway = dist;
+      $('state').textContent = 'Round ' + (S.count + 1) + ' in progress…';
+    } else if(zone === 'out'){
+      if(dist > maxAway) maxAway = dist;
+      if(dist <= R){
+        var since = S.lastLapAt ? (now - S.lastLapAt) : (now - (S.startedAt || now));
+        if(maxAway >= S.cfg.away && since >= S.cfg.minLap * 1000){
+          countLap(now, since);
+        } else {
+          // Came back too soon or never went far enough — treat as still the same lap.
+          zone = 'in';
+          $('state').textContent = maxAway < S.cfg.away
+            ? 'Back at start, but only went ' + Math.round(maxAway) + ' m out — not counted.'
+            : 'Back at start too quickly — not counted.';
+        }
+      } else {
+        $('state').textContent = 'Round ' + (S.count + 1) + ' — ' + Math.round(dist) + ' m out, max ' + Math.round(maxAway) + ' m';
+      }
+    } else {
+      $('state').textContent = dist <= R ? 'At the start point. Ready.' : 'Near the start point.';
+    }
+  }
+
+  function countLap(now, dur){
+    S.count += 1;
+    S.laps.push({ n: S.count, at: now, dur: dur });
+    S.lastLapAt = now;
+    zone = 'in'; maxAway = 0;
+    save(); render();
+    $('state').textContent = 'Round ' + S.count + ' complete.';
+    buzz([0, 120, 80, 120]);
+    beep(2);
+    say(String(S.count));
+  }
+
+  function onGeoError(err){
+    var msg = err.code === 1 ? 'Location permission denied — allow it in your browser settings.'
+            : err.code === 2 ? 'Location unavailable. Step outside for a clearer sky view.'
+            : 'Location timed out — retrying.';
+    banner(msg);
+    $('gpsPill').textContent = 'GPS: error';
+  }
+
+  function startWatch(){
+    if(DEMO){ $('gpsPill').textContent = 'GPS: demo'; return; }
+    if(watchId != null) return;
+    if(!navigator.geolocation){ banner('This browser has no GPS support.'); return; }
+    watchId = navigator.geolocation.watchPosition(onFix, onGeoError, {
+      enableHighAccuracy: true, maximumAge: 0, timeout: 30000
+    });
+    $('gpsPill').textContent = 'GPS: acquiring…';
+  }
+  function stopWatch(){
+    if(watchId != null){ navigator.geolocation.clearWatch(watchId); watchId = null; }
+    $('gpsPill').textContent = 'GPS: off';
+  }
+
+  /* ---------- buttons ---------- */
+  $('btnAnchor').onclick = function(){
+    unlockAudio();
+    if(S.anchor && !confirm('Replace the saved start point with where you are standing now?')) return;
+    anchorSamples = [];
+    banner('Stand still at your start point for a few seconds.');
+    $('state').textContent = 'Locking start point…';
+    startWatch();
+  };
+
+  $('btnStart').onclick = function(){
+    unlockAudio();
+    if(!S.anchor) return;
+    if(S.running){
+      S.running = false;
+      S.accumMs += Date.now() - S.startedAt;
+      S.startedAt = null;
+      stopWatch(); releaseWake();
+      $('state').textContent = 'Paused.';
+    } else {
+      S.running = true;
+      S.startedAt = Date.now();
+      if(!S.lastLapAt) S.lastLapAt = S.startedAt;
+      zone = 'in'; maxAway = 0;
+      startWatch(); requestWake();
+      $('state').textContent = 'Counting. Put the phone in your pocket and walk.';
+      say('Counting started');
+    }
+    save(); render();
+  };
+
+  $('btnPlus').onclick  = function(){ S.count++; S.laps.push({n:S.count, at:Date.now(), dur:null}); save(); render(); buzz(30); };
+  $('btnMinus').onclick = function(){ if(S.count>0){ S.count--; S.laps.pop(); save(); render(); buzz(30);} };
+
+  $('btnReset').onclick = function(){
+    if(!confirm('Reset the count and timer to zero? (Your start point is kept.)')) return;
+    S.count = 0; S.laps = []; S.accumMs = 0; S.lastLapAt = null;
+    S.startedAt = S.running ? Date.now() : null;
+    zone = 'in'; maxAway = 0;
+    save(); render();
+    $('state').textContent = 'Reset. Ready.';
+  };
+
+  /* settings dialog */
+  function bindRange(id, key, unit, out){
+    var el = $(id);
+    el.value = S.cfg[key];
+    $(out).textContent = S.cfg[key] + ' ' + unit;
+    el.oninput = function(){
+      S.cfg[key] = Number(el.value);
+      $(out).textContent = S.cfg[key] + ' ' + unit;
+      save();
+    };
+  }
+  function bindCheck(id, key){
+    var el = $(id);
+    el.checked = !!S.cfg[key];
+    el.onchange = function(){
+      S.cfg[key] = el.checked; save();
+      if(key === 'wake'){ el.checked && S.running ? requestWake() : releaseWake(); }
+    };
+  }
+  $('btnSettings').onclick = function(){
+    bindRange('sRadius','radius','m','vRadius');
+    bindRange('sAway','away','m','vAway');
+    bindRange('sMin','minLap','s','vMin');
+    bindCheck('cVoice','voice'); bindCheck('cBeep','beep');
+    bindCheck('cVibe','vibe');   bindCheck('cWake','wake');
+    $('dlgSettings').showModal();
+  };
+  $('btnCloseSettings').onclick = function(){ $('dlgSettings').close(); };
+
+  /* log dialog */
+  function logText(){
+    var lines = ['round,time_of_day,duration'];
+    for(var i=0;i<S.laps.length;i++){
+      var l = S.laps[i];
+      lines.push(l.n + ',' + new Date(l.at).toLocaleTimeString() + ',' + (l.dur ? mmss(l.dur) : 'manual'));
+    }
+    return lines.join('\n');
+  }
+  $('btnLog').onclick = function(){
+    var ul = $('log'); ul.innerHTML = '';
+    for(var i=S.laps.length-1;i>=0;i--){
+      var l = S.laps[i], li = document.createElement('li');
+      li.innerHTML = '<b>#' + l.n + '</b><span>' + new Date(l.at).toLocaleTimeString() +
+                     ' &nbsp;·&nbsp; ' + (l.dur ? mmss(l.dur) : 'manual') + '</span>';
+      ul.appendChild(li);
+    }
+    $('logEmpty').style.display = S.laps.length ? 'none' : 'block';
+    $('dlgLog').showModal();
+  };
+  $('btnCopy').onclick = function(){
+    var t = logText();
+    if(navigator.clipboard) navigator.clipboard.writeText(t).then(function(){ $('btnCopy').textContent='Copied'; setTimeout(function(){ $('btnCopy').textContent='Copy'; },1200); });
+    else prompt('Copy your log:', t);
+  };
+  $('btnCloseLog').onclick = function(){ $('dlgLog').close(); };
+
+  /* ---------- boot ---------- */
+  load();
+  render();
+  if(S.anchor) $('state').textContent = 'Start point saved. Tap Start when you begin.';
+  var lastSaveAt = 0;
+  setInterval(function(){
+    if(!S.running) return;
+    var now = Date.now();
+    S.accumMs += now - S.startedAt;   // bank it continuously
+    S.startedAt = now;
+    render();
+    if(now - lastSaveAt > 10000){ lastSaveAt = now; save(); }
+  }, 1000);
+
+  if(location.protocol !== 'https:' && location.hostname !== 'localhost')
+    banner('GPS needs https:// — open the app over a secure link.');
+
+  if('serviceWorker' in navigator)
+    navigator.serviceWorker.register('sw.js').catch(function(){});
+
+  window.addEventListener('beforeunload', save);
+
+  /* ---------- demo mode: ?demo=1 walks a fake circle so you can test indoors ---------- */
+  if(DEMO){
+    var t = 0, base = { lat: 33.1507, lon: -96.8236 };   // Frisco, TX area
+    S.anchor = S.anchor || base;
+    S.cfg.minLap = 8; S.cfg.away = 30;                   // fake laps are quick
+    banner('DEMO MODE — simulated walking, no real GPS. Tap Start.');
+    render();
+    setInterval(function(){
+      t += 0.25;
+      var r = 0.00055;                                    // ~60 m circle
+      onFix({ timestamp: Date.now(), coords: {
+        latitude:  S.anchor.lat + r * (1 - Math.cos(t)),
+        longitude: S.anchor.lon + r * Math.sin(t) * 1.19,
+        accuracy: 8
+      }});
+    }, 500);
+  }
+})();
+</script>
+</body>
+</html>
